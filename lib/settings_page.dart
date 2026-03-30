@@ -283,6 +283,40 @@ class _SettingsPageState extends State<SettingsPage>
     setState(() => _currentKeyword = cleanValue);
   }
 
+  Future<void> _showKeywordEditDialog() async {
+    _keywordController.text = _currentKeyword;
+
+    await showDialog<void>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Anahtar Kelimeyi Güncelle'),
+            content: TextField(
+              controller: _keywordController,
+              autofocus: true,
+              decoration: const InputDecoration(hintText: 'Yeni kelimeyi yaz'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('İptal'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final newValue = _keywordController.text.trim();
+                  await _updateKeyword(newValue);
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    _showMessage('Anahtar kelime güncellendi!');
+                  }
+                },
+                child: const Text('Kaydet'),
+              ),
+            ],
+          ),
+    );
+  }
+
   Future<void> _toggleSiren(bool value) async {
     await _upsertProfileFields({'is_siren_enabled': value});
 
@@ -440,24 +474,10 @@ class _SettingsPageState extends State<SettingsPage>
             leading: const Icon(Icons.mic, color: Colors.blue),
             title: const Text("Anahtar Kelime"),
             subtitle: Text("Şu an: \"$_currentKeyword\""),
-            trailing: SizedBox(
-              width: 120,
-              child: TextField(
-                controller: _keywordController,
-                textAlign: TextAlign.end,
-                decoration: const InputDecoration(
-                  hintText: "Kelime gir",
-                  border: InputBorder.none,
-                ),
-                onSubmitted: (value) async {
-                  await _updateKeyword(value);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Kelime güncellendi!")),
-                    );
-                  }
-                },
-              ),
+            trailing: TextButton.icon(
+              onPressed: _isSaving ? null : _showKeywordEditDialog,
+              icon: const Icon(Icons.edit, size: 18),
+              label: const Text('Düzenle'),
             ),
           ),
         ]),
