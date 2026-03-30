@@ -17,9 +17,12 @@ class _RegisterPageState extends State<RegisterPage> {
   Future<void> _signUp() async {
     setState(() => _isLoading = true);
     try {
+      final email = _emailController.text.trim();
+      final password = _passwordController.text.trim();
+
       await Supabase.instance.client.auth.signUp(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+        email: email,
+        password: password,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -29,6 +32,20 @@ class _RegisterPageState extends State<RegisterPage> {
         );
         Navigator.pop(context); // Kayıt sonrası giriş ekranına geri döner
       }
+    } on AuthApiException catch (e) {
+      if (!mounted) return;
+
+      final isRateLimit =
+          e.statusCode == 429 || e.code == 'over_email_send_rate_limit';
+
+      final message =
+          isRateLimit
+              ? 'Çok kısa sürede fazla kayıt denemesi yapıldı. 1-2 dakika bekleyip tekrar deneyin.'
+              : 'Kayıt başarısız: ${e.message}';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

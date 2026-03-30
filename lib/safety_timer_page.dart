@@ -6,7 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'services/audio_service.dart';
+import 'package:safevoice/services/audio_service.dart';
 
 class SafetyTimerPage extends StatefulWidget {
   const SafetyTimerPage({super.key});
