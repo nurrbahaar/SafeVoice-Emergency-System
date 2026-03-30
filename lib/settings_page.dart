@@ -1,0 +1,414 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage>
+    with TickerProviderStateMixin {
+  final _supabase = Supabase.instance.client;
+  late TabController _tabController;
+
+  // Kişisel Bilgiler
+  final _nameController = TextEditingController();
+  final _surnameController = TextEditingController();
+  final _phoneController = TextEditingController();
+
+  // Acil Durum
+  final _pinController = TextEditingController();
+  final _emergencyNameController = TextEditingController();
+  final _emergencyPhoneController = TextEditingController();
+
+  // Güvenlik
+  final _keywordController = TextEditingController();
+  bool _isSirenEnabled = false;
+  bool _isAutoSmsEnabled = false;
+  String _currentKeyword = "elma";
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _loadAllSettings();
+  }
+
+  Future<void> _loadAllSettings() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId != null) {
+        final data =
+            await _supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .maybeSingle();
+
+        if (data != null) {
+          setState(() {
+            // Kişisel Bilgiler
+            _nameController.text = data['full_name']?.split(' ')[0] ?? '';
+            _surnameController.text =
+                data['full_name']?.split(' ').skip(1).join(' ') ?? '';
+            _phoneController.text = data['phone'] ?? '';
+
+            // Acil Durum
+            _pinController.text = data['pin_code']?.toString() ?? '';
+            _emergencyNameController.text =
+                data['emergency_contact_name'] ?? '';
+            _emergencyPhoneController.text =
+                data['emergency_contact_phone'] ?? '';
+
+            // Güvenlik
+            _currentKeyword = data['emergency_keyword'] ?? 'elma';
+            _keywordController.text = _currentKeyword;
+            _isSirenEnabled = data['is_siren_enabled'] ?? false;
+            _isAutoSmsEnabled = data['is_auto_sms_enabled'] ?? false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Ayarlar yüklenirken hata: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _savePersonalInfo() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final fullName =
+          '${_nameController.text} ${_surnameController.text}'.trim();
+      await _supabase
+          .from('profiles')
+          .update({'full_name': fullName, 'phone': _phoneController.text})
+          .eq('id', userId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kişisel bilgiler kaydedildi!')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Hata: $e');
+    }
+  }
+
+  Future<void> _saveEmergencyContact() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      await _supabase
+          .from('profiles')
+          .update({
+            'pin_code': _pinController.text,
+            'emergency_contact_name': _emergencyNameController.text,
+            'emergency_contact_phone': _emergencyPhoneController.text,
+          })
+          .eq('id', userId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Acil durum bilgileri kaydedildi!')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Hata: $e');
+    }
+  }
+
+  Future<void> _updateKeyword(String value) async {
+    if (value.isEmpty) return;
+    final cleanValue = value.trim().toLowerCase();
+
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId != null) {
+      await _supabase
+          .from('profiles')
+          .update({'emergency_keyword': cleanValue})
+          .eq('id', userId);
+    }
+
+    setState(() => _currentKeyword = cleanValue);
+  }
+
+  Future<void> _toggleSiren(bool value) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId != null) {
+      await _supabase
+          .from('profiles')
+          .update({'is_siren_enabled': value})
+          .eq('id', userId);
+    }
+
+    setState(() => _isSirenEnabled = value);
+  }
+
+  Future<void> _toggleAutoSms(bool value) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId != null) {
+      await _supabase
+          .from('profiles')
+          .update({'is_auto_sms_enabled': value})
+          .eq('id', userId);
+    }
+
+    setState(() => _isAutoSmsEnabled = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF2F2F7),
+      appBar: AppBar(
+        title: const Text(
+          "Ayarlar",
+          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+        ),
+        centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Kişisel'),
+            Tab(text: 'Acil Durum'),
+            Tab(text: 'Güvenlik'),
+          ],
+          labelColor: Colors.blue,
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: Colors.blue,
+        ),
+      ),
+      body:
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildPersonalInfoTab(),
+                  _buildEmergencyTab(),
+                  _buildSecurityTab(),
+                ],
+              ),
+    );
+  }
+
+  Widget _buildPersonalInfoTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          const SizedBox(height: 20),
+          _buildTextField('Ad', _nameController, Icons.person),
+          const SizedBox(height: 12),
+          _buildTextField('Soyad', _surnameController, Icons.person_outline),
+          const SizedBox(height: 12),
+          _buildTextField(
+            'Telefon',
+            _phoneController,
+            Icons.phone,
+            keyboardType: TextInputType.phone,
+          ),
+          const SizedBox(height: 30),
+          ElevatedButton(
+            onPressed: _savePersonalInfo,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              minimumSize: const Size(double.infinity, 50),
+            ),
+            child: const Text(
+              'Kaydet',
+              style: TextStyle(color: Colors.white, fontSize: 16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmergencyTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          const SizedBox(height: 20),
+          _buildTextField(
+            'PIN Kodu (4 Haneli)',
+            _pinController,
+            Icons.lock,
+            keyboardType: TextInputType.number,
+          ),
+          const SizedBox(height: 12),
+          _buildTextField(
+            'Acil Durum Kişisi Adı',
+            _emergencyNameController,
+            Icons.contact_emergency,
+          ),
+          const SizedBox(height: 12),
+          _buildTextField(
+            'Acil Durum Kişisi Telefon',
+            _emergencyPhoneController,
+            Icons.phone,
+            keyboardType: TextInputType.phone,
+          ),
+          const SizedBox(height: 30),
+          ElevatedButton(
+            onPressed: _saveEmergencyContact,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              minimumSize: const Size(double.infinity, 50),
+            ),
+            child: const Text(
+              'Kaydet',
+              style: TextStyle(color: Colors.white, fontSize: 16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSecurityTab() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const SizedBox(height: 20),
+        _buildSectionHeader("SESLİ KOMUT AYARLARI"),
+        _buildSettingsGroup([
+          ListTile(
+            leading: const Icon(Icons.mic, color: Colors.blue),
+            title: const Text("Anahtar Kelime"),
+            subtitle: Text("Şu an: \"$_currentKeyword\""),
+            trailing: SizedBox(
+              width: 120,
+              child: TextField(
+                controller: _keywordController,
+                textAlign: TextAlign.end,
+                decoration: const InputDecoration(
+                  hintText: "Kelime gir",
+                  border: InputBorder.none,
+                ),
+                onSubmitted: (value) async {
+                  await _updateKeyword(value);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Kelime güncellendi!")),
+                    );
+                  }
+                },
+              ),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 20),
+        _buildSectionHeader("GÜVENLİK ÖZELLİKLERİ"),
+        _buildSettingsGroup([
+          ListTile(
+            leading: const Icon(Icons.warning_amber_rounded, color: Colors.red),
+            title: const Text("Tehlike Anında Siren Çalsın"),
+            subtitle: const Text("Yüksek sesli uyarı verir"),
+            trailing: CupertinoSwitch(
+              value: _isSirenEnabled,
+              onChanged: _toggleSiren,
+              activeColor: Colors.redAccent,
+            ),
+          ),
+          const Divider(height: 1, indent: 60),
+          ListTile(
+            leading: const Icon(Icons.sms, color: Colors.green),
+            title: const Text("Otomatik SMS Gönder"),
+            subtitle: const Text("Acil durum kişilerine mesaj atar"),
+            trailing: CupertinoSwitch(
+              value: _isAutoSmsEnabled,
+              onChanged: _toggleAutoSms,
+              activeColor: Colors.green,
+            ),
+          ),
+        ]),
+        const Padding(
+          padding: EdgeInsets.all(30.0),
+          child: Text(
+            "Ayarlar otomatik olarak kaydedilir.",
+            style: TextStyle(color: Colors.grey, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTextField(
+    String label,
+    TextEditingController controller,
+    IconData icon, {
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon, color: Colors.blue),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.all(16),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 20, top: 20, bottom: 8),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Color(0xFF8E8E93),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingsGroup(List<Widget> children) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(children: children),
+    );
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _nameController.dispose();
+    _surnameController.dispose();
+    _phoneController.dispose();
+    _pinController.dispose();
+    _emergencyNameController.dispose();
+    _emergencyPhoneController.dispose();
+    _keywordController.dispose();
+    super.dispose();
+  }
+}
