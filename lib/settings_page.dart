@@ -133,6 +133,48 @@ class _SettingsPageState extends State<SettingsPage>
     }
   }
 
+  Future<bool> _upsertEmergencyContact({
+    required String contactName,
+    required String contactPhone,
+    String? successMessage,
+  }) async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) {
+        _showMessage('Oturum bulunamadı. Tekrar giriş yapın.', isError: true);
+        return false;
+      }
+
+      setState(() => _isSaving = true);
+
+      await _supabase
+          .from('emergency_contacts')
+          .upsert({
+            'user_id': userId,
+            'contact_name': contactName,
+            'contact_phone': contactPhone,
+          }, onConflict: 'user_id')
+          .select('user_id')
+          .single()
+          .timeout(const Duration(seconds: 12));
+
+      if (successMessage != null) {
+        _showMessage(successMessage);
+      }
+      return true;
+    } on PostgrestException catch (e) {
+      _showMessage('Acil kişi kaydetme hatası: ${e.message}', isError: true);
+      return false;
+    } catch (e) {
+      _showMessage('Acil kişi kaydetme hatası: $e', isError: true);
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -163,20 +205,30 @@ class _SettingsPageState extends State<SettingsPage>
 
             // Acil Durum
             _pinController.text = data['pin_code']?.toString() ?? '';
-            _emergencyNameController.text = _firstNonEmpty(data, [
-              'emergency_contact_name',
-              'emergency_name',
-            ]);
-            _emergencyPhoneController.text = _firstNonEmpty(data, [
-              'emergency_contact_phone',
-              'emergency_phone',
-            ]);
+            _emergencyNameController.text = '';
+            _emergencyPhoneController.text = '';
 
             // Güvenlik
             _currentKeyword = data['emergency_keyword'] ?? 'elma';
             _keywordController.text = _currentKeyword;
             _isSirenEnabled = data['is_siren_enabled'] ?? false;
             _isAutoSmsEnabled = data['is_auto_sms_enabled'] ?? false;
+          });
+        }
+
+        final emergencyData =
+            await _supabase
+                .from('emergency_contacts')
+                .select('contact_name, contact_phone')
+                .eq('user_id', userId)
+                .maybeSingle();
+
+        if (emergencyData != null && mounted) {
+          setState(() {
+            _emergencyNameController.text =
+                emergencyData['contact_name']?.toString() ?? '';
+            _emergencyPhoneController.text =
+                emergencyData['contact_phone']?.toString() ?? '';
           });
         }
       }
@@ -207,11 +259,15 @@ class _SettingsPageState extends State<SettingsPage>
       return;
     }
 
-    final ok = await _upsertProfileFields({
-      'pin_code': pin,
-      'emergency_contact_name': _emergencyNameController.text.trim(),
-      'emergency_contact_phone': _emergencyPhoneController.text.trim(),
-    }, successMessage: 'Acil durum bilgileri kaydedildi!');
+    final pinOk = await _upsertProfileFields({'pin_code': pin});
+
+    if (!pinOk) return;
+
+    final ok = await _upsertEmergencyContact(
+      contactName: _emergencyNameController.text.trim(),
+      contactPhone: _emergencyPhoneController.text.trim(),
+      successMessage: 'Acil durum bilgileri kaydedildi!',
+    );
 
     if (ok) {
       await _loadAllSettings();
