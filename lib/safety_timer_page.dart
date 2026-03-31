@@ -6,7 +6,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'package:safevoice/services/audio_service.dart';
+import 'package:safevoice/audio_service.dart';
+import 'package:safevoice/siren_service.dart';
 
 class SafetyTimerPage extends StatefulWidget {
   const SafetyTimerPage({super.key});
@@ -24,6 +25,10 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
   String _realPin = "1234"; // Varsayılan değer
   final String _fakePin = "0000"; // Sahte şifren (Gizli alarm gönderir)
   final AudioService _audioService = AudioService();
+  final SirenService _sirenService = SirenService.instance;
+  Position? _lastTrackedPosition;
+  String? _trackingError;
+  StreamSubscription<Position>? _positionStream;
 
   @override
   void initState() {
@@ -97,7 +102,14 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
   // GİZLİ ALARM FONKSİYONU
   Future<void> _sendSilentEmergencyAlert() async {
     try {
-      Position position = await Geolocator.getCurrentPosition();
+      final position =
+          _lastTrackedPosition != null
+              ? _lastTrackedPosition!
+              : await Geolocator.getCurrentPosition(
+                locationSettings: const LocationSettings(
+                  accuracy: LocationAccuracy.high,
+                ),
+              );
       final supabase = Supabase.instance.client;
 
       await supabase.from('alerts').insert({
@@ -109,6 +121,7 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
         'longitude': position.longitude,
         'user_id': supabase.auth.currentUser?.id,
       });
+      _sirenService.playIfEnabled();
       if (kDebugMode) print("Sessiz alarm başarıyla gönderildi!");
     } catch (e) {
       if (kDebugMode) print("Sessiz alarm gönderilirken hata: $e");
@@ -120,7 +133,9 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
       _totalSeconds = minutes * 60;
       _remainingSeconds = _totalSeconds;
       _isTimerRunning = true;
+      _trackingError = null;
     });
+    _startLocationTracking();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_remainingSeconds > 0) {
         if (mounted) setState(() => _remainingSeconds--);
@@ -247,20 +262,30 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
 
   void _stopTimer() {
     _timer?.cancel();
+    _stopLocationTracking();
     if (mounted) setState(() => _isTimerRunning = false);
   }
 
   void _stopTimerSilent() {
     _timer?.cancel();
+    _stopLocationTracking();
     if (mounted) setState(() => _isTimerRunning = false);
   }
 
   void _onTimerExpired() async {
     _timer?.cancel();
+    _stopLocationTracking();
     if (mounted) setState(() => _isTimerRunning = false);
 
     try {
-      Position position = await Geolocator.getCurrentPosition();
+      final position =
+          _lastTrackedPosition != null
+              ? _lastTrackedPosition!
+              : await Geolocator.getCurrentPosition(
+                locationSettings: const LocationSettings(
+                  accuracy: LocationAccuracy.high,
+                ),
+              );
       final supabase = Supabase.instance.client;
 
       final data =
@@ -276,6 +301,7 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
       if (data.isNotEmpty) {
         final incidentId = data[0]['id'].toString();
         _audioService.startEmergencyRecord(incidentId);
+        _sirenService.playIfEnabled();
       }
 
       if (mounted) {
@@ -291,9 +317,70 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
     }
   }
 
+  void _startLocationTracking() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (kDebugMode) print("Konum servisleri devre dışı");
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          if (kDebugMode) print("Konum izni reddedildi");
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (kDebugMode) print("Konum izni kalıcı olarak reddedildi");
+        return;
+      }
+
+      _positionStream = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 10,
+        ),
+      ).listen(
+        (Position position) {
+          if (mounted) {
+            setState(() {
+              _lastTrackedPosition = position;
+              _trackingError = null;
+            });
+          }
+        },
+        onError: (e) {
+          if (kDebugMode) print("Konum takip hatası: $e");
+          if (mounted) {
+            setState(() {
+              _trackingError = "Konum takip hatası";
+            });
+          }
+        },
+      );
+    } catch (e) {
+      if (kDebugMode) print("Konum takip başlatılırken hata: $e");
+      if (mounted) {
+        setState(() {
+          _trackingError = "Konum takip başlatılamadı";
+        });
+      }
+    }
+  }
+
+  void _stopLocationTracking() {
+    _positionStream?.cancel();
+    _positionStream = null;
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
+    _stopLocationTracking();
     super.dispose();
   }
 
@@ -355,7 +442,7 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
                       (m) => ActionChip(
                         label: Text("$m dk"),
                         onPressed: () => _startTimer(m),
-                        backgroundColor: Colors.orange.withOpacity(0.1),
+                        backgroundColor: Colors.orange.withValues(alpha: 0.1),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20),
                         ),
@@ -373,9 +460,9 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
             margin: const EdgeInsets.symmetric(horizontal: 30),
             padding: const EdgeInsets.all(15),
             decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.05),
+              color: Colors.blue.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: Colors.blue.withOpacity(0.1)),
+              border: Border.all(color: Colors.blue.withValues(alpha: 0.1)),
             ),
             child: Row(
               children: [
@@ -448,6 +535,10 @@ class _SafetyTimerPageState extends State<SafetyTimerPage> {
             ),
           ),
         ),
+        if (_trackingError != null) ...[
+          const SizedBox(height: 16),
+          Text(_trackingError!, style: const TextStyle(color: Colors.red)),
+        ],
       ],
     );
   }

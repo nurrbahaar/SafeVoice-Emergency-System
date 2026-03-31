@@ -1,7 +1,8 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:postgrest/postgrest.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'package:safevoice/siren_service.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -13,6 +14,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage>
     with TickerProviderStateMixin {
   final _supabase = Supabase.instance.client;
+  final SirenService _sirenService = SirenService.instance;
   late TabController _tabController;
 
   // Kişisel Bilgiler
@@ -33,16 +35,6 @@ class _SettingsPageState extends State<SettingsPage>
   bool _isLoading = false;
   bool _isSaving = false;
 
-  String _firstNonEmpty(Map<String, dynamic> data, List<String> keys) {
-    for (final key in keys) {
-      final value = data[key];
-      if (value != null && value.toString().trim().isNotEmpty) {
-        return value.toString();
-      }
-    }
-    return '';
-  }
-
   void _showMessage(String message, {bool isError = false}) {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
@@ -59,11 +51,15 @@ class _SettingsPageState extends State<SettingsPage>
   Future<bool> _upsertProfileFields(
     Map<String, dynamic> fields, {
     String? successMessage,
+    bool ignoreMissingColumns = false,
   }) async {
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) {
-        _showMessage('Oturum bulunamadı. Tekrar giriş yapın.', isError: true);
+        _showMessage(
+          'Oturum bulunamadı. Tekrar giriş yapın.',
+          isError: true,
+        );
         return false;
       }
 
@@ -81,6 +77,10 @@ class _SettingsPageState extends State<SettingsPage>
       }
       return true;
     } on PostgrestException catch (e) {
+      if (ignoreMissingColumns && e.code == 'PGRST204') {
+        return true;
+      }
+
       // Some projects use different emergency contact column names.
       // Retry once with fallback names when column-not-found is returned.
       if (e.code == 'PGRST204') {
@@ -141,7 +141,10 @@ class _SettingsPageState extends State<SettingsPage>
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) {
-        _showMessage('Oturum bulunamadı. Tekrar giriş yapın.', isError: true);
+        _showMessage(
+          'Oturum bulunamadı. Tekrar giriş yapın.',
+          isError: true,
+        );
         return false;
       }
 
@@ -235,6 +238,11 @@ class _SettingsPageState extends State<SettingsPage>
     } catch (e) {
       debugPrint('Ayarlar yüklenirken hata: $e');
     } finally {
+      final localSirenEnabled = await _sirenService.isEnabled();
+      if (mounted) {
+        setState(() => _isSirenEnabled = localSirenEnabled);
+      }
+
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -318,15 +326,23 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _toggleSiren(bool value) async {
-    await _upsertProfileFields({'is_siren_enabled': value});
+    await _sirenService.setEnabled(value);
+
+    await _upsertProfileFields({
+      'is_siren_enabled': value,
+    }, ignoreMissingColumns: true);
 
     setState(() => _isSirenEnabled = value);
   }
 
   Future<void> _toggleAutoSms(bool value) async {
-    await _upsertProfileFields({'is_auto_sms_enabled': value});
+    final ok = await _upsertProfileFields({
+      'is_auto_sms_enabled': value,
+    }, ignoreMissingColumns: true);
 
-    setState(() => _isAutoSmsEnabled = value);
+    if (ok && mounted) {
+      setState(() => _isAutoSmsEnabled = value);
+    }
   }
 
   @override
@@ -491,7 +507,7 @@ class _SettingsPageState extends State<SettingsPage>
             trailing: CupertinoSwitch(
               value: _isSirenEnabled,
               onChanged: _toggleSiren,
-              activeColor: Colors.redAccent,
+              activeTrackColor: Colors.redAccent,
             ),
           ),
           const Divider(height: 1, indent: 60),
@@ -502,7 +518,7 @@ class _SettingsPageState extends State<SettingsPage>
             trailing: CupertinoSwitch(
               value: _isAutoSmsEnabled,
               onChanged: _toggleAutoSms,
-              activeColor: Colors.green,
+              activeTrackColor: Colors.green,
             ),
           ),
         ]),

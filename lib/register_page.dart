@@ -36,21 +36,21 @@ class _RegisterPageState extends State<RegisterPage> {
       if (!mounted) return;
 
       final isRateLimit =
-          e.statusCode == 429 || e.code == 'over_email_send_rate_limit';
+          e.statusCode == '429' || e.code == 'over_email_send_rate_limit';
 
       final message =
           isRateLimit
               ? 'Çok kısa sürede fazla kayıt denemesi yapıldı. 1-2 dakika bekleyip tekrar deneyin.'
               : 'Kayıt başarısız: ${e.message}';
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Hata oluştu: ${e.toString()}")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Hata oluştu: ${e.toString()}")),
+        );
       }
     } finally {
       setState(() => _isLoading = false);

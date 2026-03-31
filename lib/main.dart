@@ -9,9 +9,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:safevoice/login_page.dart';
 import 'package:safevoice/safety_timer_page.dart';
 import 'package:safevoice/settings_page.dart';
-import 'package:safevoice/services/voice_service.dart';
-import 'package:safevoice/services/audio_service.dart';
-import 'package:safevoice/services/database_service.dart';
+import 'package:safevoice/voice_service.dart';
+import 'package:safevoice/audio_service.dart';
+import 'package:safevoice/database_service.dart';
+import 'package:safevoice/siren_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +56,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final VoiceService _voiceService = VoiceService();
   final AudioService _audioService = AudioService();
+  final SirenService _sirenService = SirenService.instance;
   final Battery _battery = Battery(); // Battery sinifi artik dogru tanimli
   final DatabaseService _databaseService = DatabaseService();
 
@@ -155,6 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (alert != null) {
       final incidentId = alert['id'].toString();
       _audioService.recordAndUpload(incidentId); // Otomatik ses kaydi
+      _sirenService.playIfEnabled();
     }
   }
 
@@ -191,7 +194,9 @@ class _HomeScreenState extends State<HomeScreen> {
             } catch (e) {
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Çıkış yapılırken hata oluştu: $e")),
+                  SnackBar(
+                    content: Text("Çıkış yapılırken hata oluştu: $e"),
+                  ),
                 );
               }
             }
